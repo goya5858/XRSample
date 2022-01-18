@@ -1,9 +1,13 @@
-﻿using System;
+﻿// OculusFinger Ver.0.21 - zlib License
+// (C) NISHIDA Ryota, ship of EYLN http://dev.eyln.com
+// OculusFingerをXRToolKit用に書き直したものです
+
+using System;
 using UnityEngine;
 using System.Collections.Generic;
 using UnityEngine.XR;
 
-public class XRFinger : MonoBehaviour
+public class OculusFingerForXR : MonoBehaviour
 {
     [TooltipAttribute("Awake時に現在のFingerTypeにあわせて自動設定を行うか")]
     public bool isAwakeAutoSetup = true;
@@ -38,12 +42,15 @@ public class XRFinger : MonoBehaviour
     private InputDevice controller;
 
     [TooltipAttribute("触れると指を半分曲げる近接センサーボタン類")]
+    //public List<OVRInput.RawTouch> touchButtonPool;
     public List<InputFeatureUsage<bool>> touchButtonPool = new List<InputFeatureUsage<bool>>();
     [TooltipAttribute("握ると指を曲げるトリガー（touchButtonPool指定時は半分～最後まで）")]
+    //public OVRInput.RawAxis1D trigger = OVRInput.RawAxis1D.None;
     public InputFeatureUsage<float> trigger;
     [Range(0, 0.99f), TooltipAttribute("トリガーを使うとき、指を曲げ始める開始位置")]
     public float triggerStart = 0.0f;
     [TooltipAttribute("触れていてなおかつトリガーを少し曲げたときに指を半分曲げる近接センサーボタン")]
+    //public OVRInput.RawTouch relatedTouchButton;
     public InputFeatureUsage<bool> relatedTouchButton;
 
     [HeaderAttribute("Joint Settings")]
@@ -126,6 +133,8 @@ public class XRFinger : MonoBehaviour
         string name = transform.name.ToLower();
         string[] typeNames = { "thumb", "index", "middle", "ring", "little" };
         int typeIndex = (int)FingerType.L_Thumb;
+        //Debug.Log(name.IndexOf("_r"));
+        //if (name.IndexOf("right") >= 0) { typeIndex = (int)FingerType.R_Thumb; }
         if (name.IndexOf("_r") >= 0) { typeIndex = (int)FingerType.R_Thumb; }
 
         for (int i = 0; i < typeNames.Length; i++)
@@ -147,13 +156,16 @@ public class XRFinger : MonoBehaviour
         controller.TryGetFeatureValue(relatedTouchButton, out relatedTouchButtonValue);
         controller.TryGetFeatureValue(trigger, out triggerValue);
 
+        // Thumbの場合
         // Oculus Touchの近接センサー付きボタンを指定していて、もしどれか一つでも触れていたら指を半分曲げる
         float touchLevel = 0.0f;
+        //foreach (OVRInput.RawTouch touch in touchButtonPool) {
+        //    if (OVRInput.Get(touch)) { touchLevel = 0.5f; break; }
+        //}
         foreach (InputFeatureUsage<bool> touch in touchButtonPool)
         {
             controller.TryGetFeatureValue(touch, out touchValue);
-            //if (touchValue) { touchLevel = 0.5f; break; }
-            if (touchValue) { touchLevel += 0.5f; }
+            if (touchValue) { touchLevel = 0.5f; break; }
         }
 
         // 近接センサーを指定していて、なおかつ（この指の）トリガーを少しでもひいていたら指を半分曲げる
@@ -161,25 +173,21 @@ public class XRFinger : MonoBehaviour
         if (isRelatedTouch) touchLevel = 0.5f;
 
         // 近接センサーに触れてるか、近接センサーを指定していないとき、トリガーで曲げる
-        if (touchLevel > 0.0f || !isThumb)
+        if (touchLevel > 0.0f || touchButtonPool.Count <= 0)
         {
             float triggerLevel = (triggerValue - triggerStart) / (1 - triggerStart);
             triggerLevel = Mathf.Clamp01(triggerLevel);
-            //if (touchLevel > 0.0f) // 厳密なThresholdにすると誤作動が起きる可能性がある
-            if (triggerLevel > 0.1f)
-            {
-                triggerLevel *= 0.5f; // 近接センサーを使っているときは残りをトリガーで曲げる
-                touchLevel = Mathf.Clamp(touchLevel, 0, 0.5f);
-            }
+            if (touchLevel > 0.0f) { triggerLevel *= 0.5f; } // 近接センサーを使っているときは残りをトリガーで曲げる
             touchLevel += triggerLevel;
         }
 
         // 親指のとき、（中指、小指などの）指定のトリガーを引いていて、（親指の）近接センサーから指が離れていたら親指を立てるモードにする
         isThumbsUp = (isThumb && touchLevel <= 0.05f && triggerValue > triggerStart);
-        if (isThumbsUp) { touchLevel = -0.35f; }
+        if (isThumbsUp) { touchLevel = -0.5f; }
 
         //// 指を補間量にあわせて補間
         float lerpLevel = (touchLevel <= 0.0f) ? openLerpLevel : closeLerpLevel;
+        //if (touchLevel > 0.0f && touchButtonPool.Count > 0 && OVRInput.Get(trigger) < 0.1f) { lerpLevel *= 0.5f; } // ちょっと近接センサーに触れただけのときはゆっくり補間する
         if (touchLevel > 0.0f && touchButtonPool.Count > 0 && triggerValue < 0.1f) { lerpLevel *= 0.5f; } // ちょっと近接センサーに触れただけのときはゆっくり補間する
         angle = Mathf.Lerp(angle, maxAngle * touchLevel, lerpLevel);
     }
@@ -212,71 +220,83 @@ public class XRFinger : MonoBehaviour
         if (type == FingerType.Custom) return;
         if (type == FingerType.Auto) { AutoSetupFingerType(); return; }
 
-        triggerStart = 0.05f; //0.0fにすると、判定が厳しくなりすぎるので小さい値を設定しておく
+        //touchButtonPool.Clear();
+        //relatedTouchButton = OVRInput.RawTouch.None; //セットアップ以降上書きされないので、ここは別に初期化の必要ないのでは?
+        triggerStart = 0.0f;
         axis = new Vector3(0, 1, 0);
         isThumb = false;
 
         switch (fingerType)
         {
             case FingerType.L_Thumb:
+                //touchButtonPool.Add(OVRInput.RawTouch.LThumbstick);
                 touchButtonPool.Add(CommonUsages.primary2DAxisTouch);
                 //touchButtonPool.Add(OVRInput.RawTouch.LThumbRest); //ここはXRToolkitでは実装ないっぽい
+                //touchButtonPool.Add(OVRInput.RawTouch.X);
                 touchButtonPool.Add(CommonUsages.primaryTouch);
+                //touchButtonPool.Add(OVRInput.RawTouch.Y);
                 touchButtonPool.Add(CommonUsages.secondaryTouch);
+                //trigger = OVRInput.RawAxis1D.LHandTrigger;
                 trigger = CommonUsages.grip;
                 axis = new Vector3(0.4f, 0.0f, 0.1f);
                 isThumb = true;
                 break;
             case FingerType.L_Index:
+                //trigger = OVRInput.RawAxis1D.LIndexTrigger;
                 trigger = CommonUsages.trigger;
                 triggerStart = 0.5f;
+                //relatedTouchButton = OVRInput.RawTouch.LIndexTrigger;
                 relatedTouchButton = CommonUsages.triggerButton;
                 axis = new Vector3(0.05f, 0, 0.7f);
                 break;
             case FingerType.L_Middle:
+                //trigger = OVRInput.RawAxis1D.LHandTrigger;
                 trigger = CommonUsages.grip;
+                //relatedTouchButton = OVRInput.RawTouch.LIndexTrigger;
                 relatedTouchButton = CommonUsages.gripButton;
                 triggerStart = 0.95f;
                 axis = new Vector3(0, 0, 0.7f);
                 break;
             case FingerType.L_Ring:
+                //trigger = OVRInput.RawAxis1D.LHandTrigger;
                 trigger = CommonUsages.grip;
                 triggerStart = 0.1f;
-                touchButtonPool.Add(CommonUsages.primary2DAxisTouch);
-                touchButtonPool.Add(CommonUsages.primaryTouch);
-                touchButtonPool.Add(CommonUsages.secondaryTouch);
-                relatedTouchButton = CommonUsages.gripButton;
                 axis = new Vector3(-0.05f, 0, 0.7f);
                 break;
             case FingerType.L_Little:
+                //trigger = OVRInput.RawAxis1D.LHandTrigger;
                 trigger = CommonUsages.grip;
-                touchButtonPool.Add(CommonUsages.primary2DAxisTouch);
-                touchButtonPool.Add(CommonUsages.primaryTouch);
-                touchButtonPool.Add(CommonUsages.secondaryTouch);
-                relatedTouchButton = CommonUsages.gripButton;
                 axis = new Vector3(-0.1f, 0, 0.7f);
                 break;
 
             case FingerType.R_Thumb:
                 controllerType = XRNode.RightHand;
+                //touchButtonPool.Add(OVRInput.RawTouch.RThumbstick);
                 touchButtonPool.Add(CommonUsages.primary2DAxisTouch);
                 //touchButtonPool.Add(OVRInput.RawTouch.RThumbRest); //ここはXRToolkitでは実装ないっぽい
+                //touchButtonPool.Add(OVRInput.RawTouch.A);
                 touchButtonPool.Add(CommonUsages.primaryTouch);
+                //touchButtonPool.Add(OVRInput.RawTouch.B);
                 touchButtonPool.Add(CommonUsages.secondaryTouch);
+                //trigger = OVRInput.RawAxis1D.RHandTrigger;
                 trigger = CommonUsages.grip;
                 axis = new Vector3(0.4f, 0.0f, -0.1f);
                 isThumb = true;
                 break;
             case FingerType.R_Index:
                 controllerType = XRNode.RightHand;
+                //trigger = OVRInput.RawAxis1D.RIndexTrigger;
                 trigger = CommonUsages.trigger;
                 triggerStart = 0.1f;
+                //relatedTouchButton = OVRInput.RawTouch.RIndexTrigger;
                 relatedTouchButton = CommonUsages.triggerButton;
                 axis = new Vector3(0.05f, 0, -0.7f);
                 break;
             case FingerType.R_Middle:
                 controllerType = XRNode.RightHand;
+                //trigger = OVRInput.RawAxis1D.RHandTrigger;
                 trigger = CommonUsages.grip;
+                //relatedTouchButton = OVRInput.RawTouch.RIndexTrigger;
                 relatedTouchButton = CommonUsages.gripButton;
 
                 triggerStart = 0.95f;
@@ -284,21 +304,15 @@ public class XRFinger : MonoBehaviour
                 break;
             case FingerType.R_Ring:
                 controllerType = XRNode.RightHand;
+                //trigger = OVRInput.RawAxis1D.RHandTrigger;
                 trigger = CommonUsages.grip;
                 triggerStart = 0.1f;
-                touchButtonPool.Add(CommonUsages.primary2DAxisTouch);
-                touchButtonPool.Add(CommonUsages.primaryTouch);
-                touchButtonPool.Add(CommonUsages.secondaryTouch);
-                relatedTouchButton = CommonUsages.gripButton;
                 axis = new Vector3(-0.05f, 0, -0.7f);
                 break;
             case FingerType.R_Little:
                 controllerType = XRNode.RightHand;
+                //trigger = OVRInput.RawAxis1D.RHandTrigger;
                 trigger = CommonUsages.grip;
-                touchButtonPool.Add(CommonUsages.primary2DAxisTouch);
-                touchButtonPool.Add(CommonUsages.primaryTouch);
-                touchButtonPool.Add(CommonUsages.secondaryTouch);
-                relatedTouchButton = CommonUsages.gripButton;
                 axis = new Vector3(-0.1f, 0, -0.7f);
                 break;
         }
