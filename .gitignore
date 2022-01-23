@@ -387,3 +387,4 @@ Assets/Baseball Bats
 
 *.csproj
 *.sln
+/Assets/Clock
